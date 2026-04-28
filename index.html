@@ -467,6 +467,10 @@
                     <span class="checkbox-label">Luxury</span>
                 </label>
                 <label class="checkbox-item">
+                    <input type="checkbox" id="desc-spacious">
+                    <span class="checkbox-label">Spacious</span>
+                </label>
+                <label class="checkbox-item">
                     <input type="checkbox" id="desc-pet">
                     <span class="checkbox-label">Pet-Friendly</span>
                 </label>
@@ -706,6 +710,7 @@
             const descriptors = [];
             if (document.getElementById('desc-modern').checked) descriptors.push('modern');
             if (document.getElementById('desc-luxury').checked) descriptors.push('luxury');
+            if (document.getElementById('desc-spacious').checked) descriptors.push('spacious');
             if (document.getElementById('desc-pet').checked) descriptors.push('pet-friendly');
             if (document.getElementById('desc-commuter').checked) descriptors.push('commuter-friendly');
             if (document.getElementById('desc-new').checked) descriptors.push('new');
