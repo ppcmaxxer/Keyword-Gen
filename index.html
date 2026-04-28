@@ -504,7 +504,7 @@
         <!-- MATCH TYPE -->
         <div class="input-group">
             <div class="group-label">
-                <span class="required">●</span> Match Type
+                <span class="required">●</span> Match Type - Regular Keywords
             </div>
             <div class="checkbox-grid">
                 <label class="checkbox-item">
@@ -513,6 +513,23 @@
                 </label>
                 <label class="checkbox-item">
                     <input type="checkbox" id="match-exact" checked>
+                    <span class="checkbox-label">Exact Match [keyword]</span>
+                </label>
+            </div>
+        </div>
+        
+        <!-- MATCH TYPE - FLOOR PLANS -->
+        <div class="input-group">
+            <div class="group-label">
+                <span class="required">●</span> Match Type - Floor Plan Keywords
+            </div>
+            <div class="checkbox-grid">
+                <label class="checkbox-item">
+                    <input type="checkbox" id="match-phrase-floor" checked>
+                    <span class="checkbox-label">Phrase Match ("keyword")</span>
+                </label>
+                <label class="checkbox-item">
+                    <input type="checkbox" id="match-exact-floor" checked>
                     <span class="checkbox-label">Exact Match [keyword]</span>
                 </label>
             </div>
@@ -588,7 +605,6 @@
     <script>
         let currentKeywordsByLocation = {};
         let currentLocation = null;
-        let currentKeywordType = 'regular';
         let locations = [];
         
         // TAG INPUT FUNCTIONALITY
@@ -689,15 +705,6 @@
                 return;
             }
             
-            // Get match types
-            const includePhrase = document.getElementById('match-phrase').checked;
-            const includeExact = document.getElementById('match-exact').checked;
-            
-            if (!includePhrase && !includeExact) {
-                alert('Select at least one match type');
-                return;
-            }
-            
             // Get floor plans
             const floorPlans = [];
             if (document.getElementById('floor-studio').checked) floorPlans.push('studio');
@@ -705,6 +712,22 @@
             if (document.getElementById('floor-2bed').checked) floorPlans.push('2 bedroom');
             if (document.getElementById('floor-3bed').checked) floorPlans.push('3 bedroom');
             if (document.getElementById('floor-4bed').checked) floorPlans.push('4 bedroom');
+            
+            // Get match types
+            const includePhrase = document.getElementById('match-phrase').checked;
+            const includeExact = document.getElementById('match-exact').checked;
+            const includePhraseFloor = document.getElementById('match-phrase-floor').checked;
+            const includeExactFloor = document.getElementById('match-exact-floor').checked;
+            
+            if (!includePhrase && !includeExact) {
+                alert('Select at least one match type for regular keywords');
+                return;
+            }
+            
+            if (floorPlans.length > 0 && !includePhraseFloor && !includeExactFloor) {
+                alert('Select at least one match type for floor plan keywords');
+                return;
+            }
             
             // Get descriptors
             const descriptors = [];
@@ -719,19 +742,24 @@
             if (document.getElementById('desc-updated').checked) descriptors.push('updated');
             if (document.getElementById('desc-affordable').checked) descriptors.push('affordable');
             
-            // Initialize keywords by location
+            // Initialize keywords by location and by floor plan type
             currentKeywordsByLocation = {};
+            const floorPlansByType = {}; // Separate storage for floor plan keywords by type
+            
             locationsList.forEach(loc => {
                 currentKeywordsByLocation[loc] = {
-                    regular: new Set(),
-                    floorPlans: new Set()
+                    regular: new Set()
                 };
+            });
+            
+            // Initialize floor plan storage by type
+            floorPlans.forEach(floor => {
+                floorPlansByType[floor] = new Set();
             });
             
             // Generate keywords for each location
             locationsList.forEach(loc => {
                 const baseKeywords = new Set();
-                const floorPlanKeywords = new Set();
                 
                 // Check if this is a "near" location - if so, create proximity variations
                 const isNearLocation = loc.startsWith('near ');
@@ -758,16 +786,19 @@
                     // 1. Base: property type + location (NO floor plans, NO descriptors)
                     propertyTypes.forEach(prop => {
                         baseKeywords.add(`${prop} ${variation}`);
-                        baseKeywords.add(`${variation} ${prop}`);
+                        if (!isProximity) {
+                            // Only add reverse order for regular cities, not "near/close to/etc"
+                            baseKeywords.add(`${variation} ${prop}`);
+                        }
                         baseKeywords.add(`${prop} for rent ${variation}`);
                     });
                     
-                    // 2. Floor plans + property type + location (NO descriptors - prevents >12 word keywords)
+                    // 2. Floor plans + property type + location (stored by floor plan type, not by location)
                     if (floorPlans.length > 0) {
                         propertyTypes.forEach(prop => {
                             floorPlans.forEach(floor => {
-                                floorPlanKeywords.add(`${floor} ${prop} ${variation}`);
-                                floorPlanKeywords.add(`${floor} ${prop} for rent ${variation}`);
+                                floorPlansByType[floor].add(`${floor} ${prop} ${variation}`);
+                                floorPlansByType[floor].add(`${floor} ${prop} for rent ${variation}`);
                             });
                         });
                     }
@@ -781,14 +812,9 @@
                             });
                         });
                     }
-                    
-                    // NOTE: Removed floor plans + descriptors combo to stay under 12 word limit
                 });
                 
-                // Format keywords based on match type and store separately
-                currentKeywordsByLocation[loc].regular = new Set();
-                currentKeywordsByLocation[loc].floorPlans = new Set();
-                
+                // Format regular keywords based on match type
                 baseKeywords.forEach(kw => {
                     if (includePhrase) {
                         currentKeywordsByLocation[loc].regular.add(`"${kw}"`);
@@ -798,22 +824,29 @@
                     }
                 });
                 
-                floorPlanKeywords.forEach(kw => {
-                    if (includePhrase) {
-                        currentKeywordsByLocation[loc].floorPlans.add(`"${kw}"`);
-                    }
-                    if (includeExact) {
-                        currentKeywordsByLocation[loc].floorPlans.add(`[${kw}]`);
-                    }
-                });
-                
-                // Convert to sorted arrays
+                // Convert to sorted array
                 currentKeywordsByLocation[loc].regular = Array.from(currentKeywordsByLocation[loc].regular).sort();
-                currentKeywordsByLocation[loc].floorPlans = Array.from(currentKeywordsByLocation[loc].floorPlans).sort();
             });
             
-            // Set first location as active
-            currentLocation = locationsList[0];
+            // Format floor plan keywords by type (across all locations)
+            Object.keys(floorPlansByType).forEach(floor => {
+                const formatted = new Set();
+                floorPlansByType[floor].forEach(kw => {
+                    if (includePhraseFloor) {
+                        formatted.add(`"${kw}"`);
+                    }
+                    if (includeExactFloor) {
+                        formatted.add(`[${kw}]`);
+                    }
+                });
+                floorPlansByType[floor] = Array.from(formatted).sort();
+            });
+            
+            // Store floor plans globally
+            window.floorPlanKeywords = floorPlansByType;
+            
+            // Set first location as active (default to All Keywords tab)
+            currentLocation = '__ALL_KEYWORDS__';
             displayResults();
         }
         
@@ -823,80 +856,150 @@
             const keywordList = document.getElementById('keyword-list');
             const countDiv = document.getElementById('keyword-count');
             
-            // Create tabs with dropdown for keyword type
             const locations = Object.keys(currentKeywordsByLocation);
-            tabsDiv.innerHTML = locations.map(loc => {
-                const regularCount = currentKeywordsByLocation[loc].regular.length;
-                const floorPlanCount = currentKeywordsByLocation[loc].floorPlans.length;
-                return `
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <button class="location-tab ${loc === currentLocation ? 'active' : ''}" onclick="switchLocation('${loc.replace(/'/g, "\\'")}')">${loc}</button>
-                        <select onchange="switchKeywordType('${loc.replace(/'/g, "\\'")}', this.value)" style="font-size: 11px; padding: 4px; border-radius: 4px; border: 1px solid #ddd;">
-                            <option value="regular">Regular (${regularCount})</option>
-                            <option value="floorPlans">Floor Plans (${floorPlanCount})</option>
-                        </select>
-                    </div>
-                `;
-            }).join('');
+            const floorPlanTypes = Object.keys(window.floorPlanKeywords || {});
             
-            // Display keywords for current location (default to regular)
-            if (!currentKeywordType) currentKeywordType = 'regular';
-            const keywords = currentKeywordsByLocation[currentLocation][currentKeywordType] || [];
+            // Build tabs HTML
+            let tabsHTML = '';
+            
+            // Calculate totals
+            const allRegularCount = locations.reduce((sum, loc) => sum + currentKeywordsByLocation[loc].regular.length, 0);
+            const allFloorPlanCount = floorPlanTypes.reduce((sum, floor) => sum + (window.floorPlanKeywords[floor]?.length || 0), 0);
+            const totalCount = allRegularCount + allFloorPlanCount;
+            
+            // Add "All Keywords" tab first
+            tabsHTML += `
+                <button class="location-tab ${currentLocation === '__ALL_KEYWORDS__' ? 'active' : ''}" onclick="switchLocation('__ALL_KEYWORDS__')" style="font-weight: 700; ${currentLocation === '__ALL_KEYWORDS__' ? 'background: linear-gradient(135deg, #27ae60 0%, #229954 100%); color: white;' : 'background: white; color: #27ae60; border: 2px solid #27ae60;'}">All Keywords (${totalCount})</button>
+            `;
+            
+            // Add individual location tabs
+            locations.forEach(loc => {
+                const count = currentKeywordsByLocation[loc].regular.length;
+                tabsHTML += `
+                    <button class="location-tab ${loc === currentLocation && currentLocation !== '__ALL_KEYWORDS__' ? 'active' : ''}" onclick="switchLocation('${loc.replace(/'/g, "\\'")}')">${loc} (${count})</button>
+                `;
+            });
+            
+            // Add floor plan tabs if any exist
+            if (floorPlanTypes.length > 0) {
+                tabsHTML += `<div style="width: 100%; border-top: 2px solid #ecf0f1; margin: 10px 0;"></div>`;
+                floorPlanTypes.forEach(floor => {
+                    const count = window.floorPlanKeywords[floor]?.length || 0;
+                    const tabName = floor.charAt(0).toUpperCase() + floor.slice(1); // Capitalize
+                    tabsHTML += `
+                        <button class="location-tab ${currentLocation === floor ? 'active' : ''}" onclick="switchLocation('${floor.replace(/'/g, "\\'")}')" style="background: #f0f3ff; border: 1px solid #667eea;">${tabName} (${count})</button>
+                    `;
+                });
+            }
+            
+            tabsDiv.innerHTML = tabsHTML;
+            
+            // Display keywords for current location/floor plan
+            let keywords = [];
+            
+            if (currentLocation === '__ALL_KEYWORDS__') {
+                // Combine EVERYTHING - all regular keywords + all floor plan keywords
+                locations.forEach(loc => {
+                    keywords.push(...currentKeywordsByLocation[loc].regular);
+                });
+                floorPlanTypes.forEach(floor => {
+                    keywords.push(...(window.floorPlanKeywords[floor] || []));
+                });
+                keywords = [...new Set(keywords)].sort();
+            } else if (window.floorPlanKeywords && window.floorPlanKeywords[currentLocation]) {
+                // Floor plan tab
+                keywords = window.floorPlanKeywords[currentLocation] || [];
+            } else {
+                // Individual location tab
+                keywords = currentKeywordsByLocation[currentLocation]?.regular || [];
+            }
+            
             keywordList.innerHTML = keywords
                 .map(kw => `<div class="keyword-item">${escapeHtml(kw)}</div>`)
                 .join('');
             
             // Update count
-            const totalRegular = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.regular.length, 0);
-            const totalFloorPlans = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.floorPlans.length, 0);
-            countDiv.textContent = `${keywords.length} (${totalRegular + totalFloorPlans} total)`;
+            countDiv.textContent = `${keywords.length} (${totalCount} total)`;
             
             resultsDiv.classList.add('active');
         }
         
         function switchLocation(location) {
             currentLocation = location;
-            currentKeywordType = 'regular'; // Reset to regular when switching locations
             
-            // Update active tab
+            // Update active tab - clear all first
+            document.querySelectorAll('.location-tab').forEach(tab => tab.classList.remove('active'));
+            
+            // Find and highlight the correct tab
             document.querySelectorAll('.location-tab').forEach(tab => {
-                tab.classList.remove('active');
-                if (tab.textContent === location) {
+                const tabText = tab.textContent.trim();
+                
+                if (location === '__ALL_KEYWORDS__' && tabText.startsWith('All Keywords')) {
+                    tab.classList.add('active');
+                }
+                else if (window.floorPlanKeywords && window.floorPlanKeywords[location]) {
+                    // Floor plan tab - match by checking if tab text starts with capitalized floor plan name
+                    const tabName = location.charAt(0).toUpperCase() + location.slice(1);
+                    if (tabText.startsWith(tabName)) {
+                        tab.classList.add('active');
+                    }
+                }
+                else if (tabText.split('(')[0].trim() === location) {
+                    // Location tab - exact match before the count
                     tab.classList.add('active');
                 }
             });
             
-            // Display keywords for selected location
-            const keywords = currentKeywordsByLocation[location][currentKeywordType] || [];
+            // Display keywords
+            let keywords = [];
+            const locations = Object.keys(currentKeywordsByLocation);
+            const floorPlanTypes = Object.keys(window.floorPlanKeywords || {});
+            
+            if (location === '__ALL_KEYWORDS__') {
+                // Combine EVERYTHING
+                locations.forEach(loc => {
+                    keywords.push(...currentKeywordsByLocation[loc].regular);
+                });
+                floorPlanTypes.forEach(floor => {
+                    keywords.push(...(window.floorPlanKeywords[floor] || []));
+                });
+                keywords = [...new Set(keywords)].sort();
+            } else if (window.floorPlanKeywords && window.floorPlanKeywords[location]) {
+                keywords = window.floorPlanKeywords[location] || [];
+            } else {
+                keywords = currentKeywordsByLocation[location]?.regular || [];
+            }
+            
             const keywordList = document.getElementById('keyword-list');
             keywordList.innerHTML = keywords
                 .map(kw => `<div class="keyword-item">${escapeHtml(kw)}</div>`)
                 .join('');
             
             // Update count
-            const totalRegular = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.regular.length, 0);
-            const totalFloorPlans = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.floorPlans.length, 0);
-            document.getElementById('keyword-count').textContent = `${keywords.length} (${totalRegular + totalFloorPlans} total)`;
-        }
-        
-        function switchKeywordType(location, type) {
-            currentKeywordType = type;
-            
-            // Display keywords for selected type
-            const keywords = currentKeywordsByLocation[location][type] || [];
-            const keywordList = document.getElementById('keyword-list');
-            keywordList.innerHTML = keywords
-                .map(kw => `<div class="keyword-item">${escapeHtml(kw)}</div>`)
-                .join('');
-            
-            // Update count
-            const totalRegular = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.regular.length, 0);
-            const totalFloorPlans = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.floorPlans.length, 0);
-            document.getElementById('keyword-count').textContent = `${keywords.length} (${totalRegular + totalFloorPlans} total)`;
+            const allRegularCount = locations.reduce((sum, loc) => sum + currentKeywordsByLocation[loc].regular.length, 0);
+            const allFloorPlanCount = floorPlanTypes.reduce((sum, floor) => sum + (window.floorPlanKeywords[floor]?.length || 0), 0);
+            document.getElementById('keyword-count').textContent = `${keywords.length} (${allRegularCount + allFloorPlanCount} total)`;
         }
         
         function copyLocationKeywords() {
-            const keywords = currentKeywordsByLocation[currentLocation][currentKeywordType] || [];
+            let keywords = [];
+            const locations = Object.keys(currentKeywordsByLocation);
+            const floorPlanTypes = Object.keys(window.floorPlanKeywords || {});
+            
+            if (currentLocation === '__ALL_KEYWORDS__') {
+                locations.forEach(loc => {
+                    keywords.push(...currentKeywordsByLocation[loc].regular);
+                });
+                floorPlanTypes.forEach(floor => {
+                    keywords.push(...(window.floorPlanKeywords[floor] || []));
+                });
+                keywords = [...new Set(keywords)].sort();
+            } else if (window.floorPlanKeywords && window.floorPlanKeywords[currentLocation]) {
+                keywords = window.floorPlanKeywords[currentLocation] || [];
+            } else {
+                keywords = currentKeywordsByLocation[currentLocation]?.regular || [];
+            }
+            
             const text = keywords.join('\n');
             navigator.clipboard.writeText(text).then(() => {
                 const btn = event.target;
@@ -908,10 +1011,27 @@
         }
         
         function downloadLocationKeywords() {
-            const keywords = currentKeywordsByLocation[currentLocation][currentKeywordType] || [];
+            let keywords = [];
+            const locations = Object.keys(currentKeywordsByLocation);
+            const floorPlanTypes = Object.keys(window.floorPlanKeywords || {});
+            
+            if (currentLocation === '__ALL_KEYWORDS__') {
+                locations.forEach(loc => {
+                    keywords.push(...currentKeywordsByLocation[loc].regular);
+                });
+                floorPlanTypes.forEach(floor => {
+                    keywords.push(...(window.floorPlanKeywords[floor] || []));
+                });
+                keywords = [...new Set(keywords)].sort();
+            } else if (window.floorPlanKeywords && window.floorPlanKeywords[currentLocation]) {
+                keywords = window.floorPlanKeywords[currentLocation] || [];
+            } else {
+                keywords = currentKeywordsByLocation[currentLocation]?.regular || [];
+            }
+            
             const text = keywords.join('\n');
-            const typeLabel = currentKeywordType === 'regular' ? 'regular' : 'floor_plans';
-            const filename = `${currentLocation}_${typeLabel}_keywords.txt`.replace(/\s+/g, '_');
+            const locationLabel = currentLocation === '__ALL_KEYWORDS__' ? 'all_keywords' : currentLocation;
+            const filename = `${locationLabel}_keywords.txt`.replace(/\s+/g, '_');
             const element = document.createElement('a');
             element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
             element.setAttribute('download', filename);
@@ -929,10 +1049,12 @@
             document.getElementById('prop-apartments').checked = true;
             document.getElementById('match-phrase').checked = true;
             document.getElementById('match-exact').checked = true;
+            document.getElementById('match-phrase-floor').checked = true;
+            document.getElementById('match-exact-floor').checked = true;
             document.getElementById('results').classList.remove('active');
             currentKeywordsByLocation = {};
             currentLocation = null;
-            currentKeywordType = 'regular';
+            window.floorPlanKeywords = {};
         }
         
         function escapeHtml(text) {
