@@ -584,6 +584,7 @@
     <script>
         let currentKeywordsByLocation = {};
         let currentLocation = null;
+        let currentKeywordType = 'regular';
         let locations = [];
         
         // TAG INPUT FUNCTIONALITY
@@ -591,8 +592,8 @@
         const locationTags = document.getElementById('locationTags');
         const locationTagContainer = document.getElementById('locationTagContainer');
         
-        // Load default locations
-        const defaultLocations = ['Atlanta', 'Cherry Creek', 'South Atlanta', 'near downtown Atlanta', 'near buckhead Atlanta'];
+        // Load default locations (now empty)
+        const defaultLocations = [];
         defaultLocations.forEach(loc => addLocationTag(loc));
         
         // Click container to focus input
@@ -716,12 +717,16 @@
             // Initialize keywords by location
             currentKeywordsByLocation = {};
             locationsList.forEach(loc => {
-                currentKeywordsByLocation[loc] = new Set();
+                currentKeywordsByLocation[loc] = {
+                    regular: new Set(),
+                    floorPlans: new Set()
+                };
             });
             
             // Generate keywords for each location
             locationsList.forEach(loc => {
                 const baseKeywords = new Set();
+                const floorPlanKeywords = new Set();
                 
                 // Check if this is a "near" location - if so, create proximity variations
                 const isNearLocation = loc.startsWith('near ');
@@ -745,24 +750,24 @@
                 proximityVariations.forEach(variation => {
                     const isProximity = variation !== loc || isNearLocation;
                     
-                    // 1. Base: property type + location
+                    // 1. Base: property type + location (NO floor plans, NO descriptors)
                     propertyTypes.forEach(prop => {
                         baseKeywords.add(`${prop} ${variation}`);
                         baseKeywords.add(`${variation} ${prop}`);
                         baseKeywords.add(`${prop} for rent ${variation}`);
                     });
                     
-                    // 2. Floor plans + property type + location
+                    // 2. Floor plans + property type + location (NO descriptors - prevents >12 word keywords)
                     if (floorPlans.length > 0) {
                         propertyTypes.forEach(prop => {
                             floorPlans.forEach(floor => {
-                                baseKeywords.add(`${floor} ${prop} ${variation}`);
-                                baseKeywords.add(`${floor} ${prop} for rent ${variation}`);
+                                floorPlanKeywords.add(`${floor} ${prop} ${variation}`);
+                                floorPlanKeywords.add(`${floor} ${prop} for rent ${variation}`);
                             });
                         });
                     }
                     
-                    // 3. Descriptors + property type + location
+                    // 3. Descriptors + property type + location (NO floor plans)
                     if (descriptors.length > 0) {
                         propertyTypes.forEach(prop => {
                             descriptors.forEach(desc => {
@@ -772,31 +777,34 @@
                         });
                     }
                     
-                    // 4. Floor plans + descriptors + property type + location
-                    if (floorPlans.length > 0 && descriptors.length > 0) {
-                        propertyTypes.forEach(prop => {
-                            floorPlans.forEach(floor => {
-                                descriptors.forEach(desc => {
-                                    baseKeywords.add(`${desc} ${floor} ${prop} ${variation}`);
-                                    baseKeywords.add(`${desc} ${floor} ${prop} for rent ${variation}`);
-                                });
-                            });
-                        });
-                    }
+                    // NOTE: Removed floor plans + descriptors combo to stay under 12 word limit
                 });
                 
-                // Format keywords based on match type
+                // Format keywords based on match type and store separately
+                currentKeywordsByLocation[loc].regular = new Set();
+                currentKeywordsByLocation[loc].floorPlans = new Set();
+                
                 baseKeywords.forEach(kw => {
                     if (includePhrase) {
-                        currentKeywordsByLocation[loc].add(`"${kw}"`);
+                        currentKeywordsByLocation[loc].regular.add(`"${kw}"`);
                     }
                     if (includeExact) {
-                        currentKeywordsByLocation[loc].add(`[${kw}]`);
+                        currentKeywordsByLocation[loc].regular.add(`[${kw}]`);
                     }
                 });
                 
-                // Convert to sorted array
-                currentKeywordsByLocation[loc] = Array.from(currentKeywordsByLocation[loc]).sort();
+                floorPlanKeywords.forEach(kw => {
+                    if (includePhrase) {
+                        currentKeywordsByLocation[loc].floorPlans.add(`"${kw}"`);
+                    }
+                    if (includeExact) {
+                        currentKeywordsByLocation[loc].floorPlans.add(`[${kw}]`);
+                    }
+                });
+                
+                // Convert to sorted arrays
+                currentKeywordsByLocation[loc].regular = Array.from(currentKeywordsByLocation[loc].regular).sort();
+                currentKeywordsByLocation[loc].floorPlans = Array.from(currentKeywordsByLocation[loc].floorPlans).sort();
             });
             
             // Set first location as active
@@ -810,27 +818,40 @@
             const keywordList = document.getElementById('keyword-list');
             const countDiv = document.getElementById('keyword-count');
             
-            // Create tabs
+            // Create tabs with dropdown for keyword type
             const locations = Object.keys(currentKeywordsByLocation);
-            tabsDiv.innerHTML = locations.map(loc => 
-                `<button class="location-tab ${loc === currentLocation ? 'active' : ''}" onclick="switchLocation('${loc.replace(/'/g, "\\'")}')">${loc}</button>`
-            ).join('');
+            tabsDiv.innerHTML = locations.map(loc => {
+                const regularCount = currentKeywordsByLocation[loc].regular.length;
+                const floorPlanCount = currentKeywordsByLocation[loc].floorPlans.length;
+                return `
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <button class="location-tab ${loc === currentLocation ? 'active' : ''}" onclick="switchLocation('${loc.replace(/'/g, "\\'")}')">${loc}</button>
+                        <select onchange="switchKeywordType('${loc.replace(/'/g, "\\'")}', this.value)" style="font-size: 11px; padding: 4px; border-radius: 4px; border: 1px solid #ddd;">
+                            <option value="regular">Regular (${regularCount})</option>
+                            <option value="floorPlans">Floor Plans (${floorPlanCount})</option>
+                        </select>
+                    </div>
+                `;
+            }).join('');
             
-            // Display keywords for current location
-            const keywords = currentKeywordsByLocation[currentLocation] || [];
+            // Display keywords for current location (default to regular)
+            if (!currentKeywordType) currentKeywordType = 'regular';
+            const keywords = currentKeywordsByLocation[currentLocation][currentKeywordType] || [];
             keywordList.innerHTML = keywords
                 .map(kw => `<div class="keyword-item">${escapeHtml(kw)}</div>`)
                 .join('');
             
             // Update count
-            const totalCount = Object.values(currentKeywordsByLocation).reduce((sum, arr) => sum + arr.length, 0);
-            countDiv.textContent = `${keywords.length} (${totalCount} total)`;
+            const totalRegular = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.regular.length, 0);
+            const totalFloorPlans = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.floorPlans.length, 0);
+            countDiv.textContent = `${keywords.length} (${totalRegular + totalFloorPlans} total)`;
             
             resultsDiv.classList.add('active');
         }
         
         function switchLocation(location) {
             currentLocation = location;
+            currentKeywordType = 'regular'; // Reset to regular when switching locations
             
             // Update active tab
             document.querySelectorAll('.location-tab').forEach(tab => {
@@ -841,19 +862,36 @@
             });
             
             // Display keywords for selected location
-            const keywords = currentKeywordsByLocation[location] || [];
+            const keywords = currentKeywordsByLocation[location][currentKeywordType] || [];
             const keywordList = document.getElementById('keyword-list');
             keywordList.innerHTML = keywords
                 .map(kw => `<div class="keyword-item">${escapeHtml(kw)}</div>`)
                 .join('');
             
             // Update count
-            const totalCount = Object.values(currentKeywordsByLocation).reduce((sum, arr) => sum + arr.length, 0);
-            document.getElementById('keyword-count').textContent = `${keywords.length} (${totalCount} total)`;
+            const totalRegular = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.regular.length, 0);
+            const totalFloorPlans = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.floorPlans.length, 0);
+            document.getElementById('keyword-count').textContent = `${keywords.length} (${totalRegular + totalFloorPlans} total)`;
+        }
+        
+        function switchKeywordType(location, type) {
+            currentKeywordType = type;
+            
+            // Display keywords for selected type
+            const keywords = currentKeywordsByLocation[location][type] || [];
+            const keywordList = document.getElementById('keyword-list');
+            keywordList.innerHTML = keywords
+                .map(kw => `<div class="keyword-item">${escapeHtml(kw)}</div>`)
+                .join('');
+            
+            // Update count
+            const totalRegular = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.regular.length, 0);
+            const totalFloorPlans = Object.values(currentKeywordsByLocation).reduce((sum, loc) => sum + loc.floorPlans.length, 0);
+            document.getElementById('keyword-count').textContent = `${keywords.length} (${totalRegular + totalFloorPlans} total)`;
         }
         
         function copyLocationKeywords() {
-            const keywords = currentKeywordsByLocation[currentLocation] || [];
+            const keywords = currentKeywordsByLocation[currentLocation][currentKeywordType] || [];
             const text = keywords.join('\n');
             navigator.clipboard.writeText(text).then(() => {
                 const btn = event.target;
@@ -865,9 +903,10 @@
         }
         
         function downloadLocationKeywords() {
-            const keywords = currentKeywordsByLocation[currentLocation] || [];
+            const keywords = currentKeywordsByLocation[currentLocation][currentKeywordType] || [];
             const text = keywords.join('\n');
-            const filename = `${currentLocation}_keywords.txt`.replace(/\s+/g, '_');
+            const typeLabel = currentKeywordType === 'regular' ? 'regular' : 'floor_plans';
+            const filename = `${currentLocation}_${typeLabel}_keywords.txt`.replace(/\s+/g, '_');
             const element = document.createElement('a');
             element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
             element.setAttribute('download', filename);
@@ -888,6 +927,7 @@
             document.getElementById('results').classList.remove('active');
             currentKeywordsByLocation = {};
             currentLocation = null;
+            currentKeywordType = 'regular';
         }
         
         function escapeHtml(text) {
